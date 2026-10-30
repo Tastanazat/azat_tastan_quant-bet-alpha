@@ -2,7 +2,7 @@ name: QuantBet Daily Pipeline
 
 on:
   schedule:
-  - cron: '0 7 * * *' # Her gün saat 10:00'da (TSİ) çalışır
+    - cron: '0 7 * * *' # Her gün saat 10:00'da (TSİ) çalışır
   workflow_dispatch:
 
 jobs:
@@ -25,5 +25,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-        python main.py
-
+        run: python main.py
