@@ -7,14 +7,12 @@ from src.fetcher import fetch_understat_metrics, fetch_odds_from_api
 from src.notifier import send_telegram_alert
 
 def clean_team_name(team_name: str) -> str:
-    """ClubElo ve Understat uyumluluğu için Türkçe karakterleri temizler ve boşlukları kaldırır."""
     tr_chars = {'ç': 'c', 'ç': 'c', 'ğ': 'g', 'ö': 'o', 'ş': 's', 'ü': 'u', 'İ': 'I', 'ı': 'i'}
     for k, v in tr_chars.items():
         team_name = team_name.replace(k, v)
     return team_name.strip()
 
 def fetch_club_elo(team_name: str) -> float:
-    """ClubElo API üzerinden takımın güncel Elo puanını dinamik ve temizlenmiş isimle çeker."""
     try:
         formatted_name = clean_team_name(team_name).replace(" ", "")
         url = f"http://api.clubelo.com/{formatted_name}"
@@ -25,17 +23,18 @@ def fetch_club_elo(team_name: str) -> float:
                 return float(df.iloc[-1]['Elo'])
     except Exception as e:
         print(f"Elo çekilemedi ({team_name}): {e}")
-    return 1500.0 # Bağlantı hatası durumunda varsayılan güvenli lig ortalaması
+    return 1500.0
 
 def run_pipeline():
     print("QuantBet Alpha: Canlı Fikstür Taraması ve Analiz Başlatılıyor...")
-    engine = QuantBettingEngine(league_avg_xg=1.38)
+    send_telegram_alert("🤖 *QuantBet Alpha* sistem testi: Bot başarıyla çalıştı ve taramayı başlattı!")
     
-    # 1. The Odds API üzerinden güncel maç fikstürünü çekiyoruz
+    engine = QuantBettingEngine(league_avg_xg=1.38)
     fixtures = fetch_odds_from_api(sport_key="soccer_turkey_super_lig")
     
     if not fixtures:
         print("Bugün için API'den maç çekilemedi veya maç bulunamadı.")
+        send_telegram_alert("⚠️ Bugün taranan ligde aktif maç bulunamadı veya API verisi dönmedi.")
         return
 
     for game in fixtures:
@@ -46,7 +45,6 @@ def run_pipeline():
         if not bookmakers:
             continue
             
-        # Büronun (Pinnacle/Bookie) maç sonu ve alt/üst oranlarını alıyoruz
         markets = bookmakers[0].get('markets', [])
         odds_dict = {}
         for market in markets:
@@ -66,36 +64,19 @@ def run_pipeline():
         if len(odds_dict) < 3:
             continue
 
-        # 2. Canlı Elo ve Understat EWMA Verilerini Çek
         home_elo = fetch_club_elo(home_team)
         away_elo = fetch_club_elo(away_team)
         
         home_stats = fetch_understat_metrics(home_team)
         away_stats = fetch_understat_metrics(away_team)
         
-        ev_sahibi = TeamMetrics(
-            name=home_team, 
-            elo=home_elo, 
-            npxg_for=home_stats["npxg_for"], 
-            npxg_against=home_stats["npxg_against"], 
-            ppda=home_stats["ppda"], 
-            rest_days=5
-        )
-        deplasman = TeamMetrics(
-            name=away_team, 
-            elo=away_elo, 
-            npxg_for=away_stats["npxg_for"], 
-            npxg_against=away_stats["npxg_against"], 
-            ppda=away_stats["ppda"], 
-            rest_days=5
-        )
+        ev_sahibi = TeamMetrics(name=home_team, elo=home_elo, npxg_for=home_stats["npxg_for"], npxg_against=home_stats["npxg_against"], ppda=home_stats["ppda"], rest_days=5)
+        deplasman = TeamMetrics(name=away_team, elo=away_elo, npxg_for=away_stats["npxg_for"], npxg_against=away_stats["npxg_against"], ppda=away_stats["ppda"], rest_days=5)
 
-        # 3. Model Hesaplaması (Dixon-Coles + Poisson Matrisi)
         lam_h, lam_a = engine.calculate_lambdas(ev_sahibi, deplasman)
         matrix = engine.build_score_matrix(lam_h, lam_a)
         probs = engine.extract_probabilities(matrix)
 
-        # 4. Rapor Oluşturma ve +EV Filtrelemesi (%3+)
         report = [
             "🤖 *QuantBet Alpha - Canlı Maç Raporu*",
             f"⚽ *{ev_sahibi.name} (Elo: {ev_sahibi.elo}) vs {deplasman.name} (Elo: {deplasman.elo})*",
@@ -116,10 +97,8 @@ def run_pipeline():
                         f"• Çeyrek Kelly Kasa: `%{res['quarter_kelly_pct']}`\n"
                     )
 
-        # Sadece +EV fırsatı barındıran maçlar Telegram'a gönderilir
         if found_value:
             send_telegram_alert("\n".join(report))
-            print(f"Rapor gönderildi: {home_team} vs {away_team}")
         else:
             print(f"Fırsat bulunamadı (Pas): {home_team} vs {away_team}")
 
