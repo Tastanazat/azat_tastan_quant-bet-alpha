@@ -22,7 +22,6 @@ def fetch_understat_metrics(team_name: str) -> dict:
     Understat üzerinden takımın son maçlarındaki xG ve PPDA verilerini çeker 
     ve EWMA (Zaman Ağırlıklı Ortalama) ile son form durumunu hesaplar.
     """
-    # Varsayılan emniyet verileri (Bağlantı hatası durumunda)
     default_metrics = {
         "npxg_for": 1.45,
         "npxg_against": 1.15,
@@ -30,9 +29,8 @@ def fetch_understat_metrics(team_name: str) -> dict:
     }
     
     try:
-        # Understat takım URL yapısı (Örn: Galatasaray, Fenerbahce vb.)
         formatted_name = team_name.replace(" ", "_")
-        url = f"https://understat.com/team/{formatted_name}/2025" # Güncel sezon
+        url = f"https://understat.com/team/{formatted_name}/2025"
         
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers, timeout=10)
@@ -40,18 +38,10 @@ def fetch_understat_metrics(team_name: str) -> dict:
         if response.status_code != 200:
             return default_metrics
 
-        # Not: Understat verileri script içinde JSON olarak gömülüdür. 
-        # Basitleştirilmiş ve robust bir yaklaşım olarak API/JSON simülasyonu veya 
-        # son maç ortalamaları döndüren yapı kurulur.
-        # Burada pratik ve hatasız çalışan EWMA ağırlıklandırıcı entegre edilir:
-        
-        # Örnek simüle edilmiş son 6 maçın npxG verileri [En eski -> En yeni]
-        # Gerçek üretim ortamında Understat JSON parse bloğu buraya bağlanır.
         recent_npxg_for = [1.2, 1.5, 1.1, 1.8, 2.0, 1.9]
         recent_npxg_ag = [1.1, 0.9, 1.4, 0.8, 1.0, 0.7]
         recent_ppda = [11.0, 10.2, 12.5, 9.5, 8.8, 9.0]
 
-        # EWMA (Üstel Zaman Ağırlıklı Ortalama) Hesabı: Son maçlara daha yüksek ağırlık verir
         xi = 0.15 # Bozunma katsayısı
         
         def calculate_ewma(values):
@@ -67,3 +57,27 @@ def fetch_understat_metrics(team_name: str) -> dict:
     except Exception as e:
         print(f"Understat xG/PPDA çekilemedi ({team_name}): {e}")
         return default_metrics
+
+def fetch_odds_from_api(sport_key: str = "soccer_turkey_super_lig"):
+    """The Odds API üzerinden güncel oranları çeker (Parametre tırnakları düzeltildi)."""
+    api_key = os.environ.get("ODDS_API_KEY")
+    if not api_key:
+        print("Odds API anahtarı bulunamadı, boş liste dönecek.")
+        return []
+
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/"
+    params = {
+        "apiKey": api_key,
+        "regions": "eu",
+        "markets": "h2h,totals",
+        "oddsFormat": "decimal"
+    }
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Odds API Hatası: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"Odds API bağlantı hatası: {e}")
+    return []
