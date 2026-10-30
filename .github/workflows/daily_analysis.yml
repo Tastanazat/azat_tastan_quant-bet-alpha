@@ -1,1 +1,29 @@
+name: QuantBet Daily Pipeline
+
+on:
+  schedule:
+  - cron: '0 7 * * *' # Her gün saat 10:00'da (TSİ) çalışır
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Klonla
+        uses: actions/checkout@v4
+
+      - name: Python Kurulumu
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Paketleri Yükle
+        run: pip install -r requirements.txt
+
+      - name: Motoru Çalıştır
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        python main.py
 
