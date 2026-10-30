@@ -1,4 +1,3 @@
-
 import math
 import numpy as np
 from dataclasses import dataclass
@@ -33,11 +32,8 @@ class QuantBettingEngine:
         elo_factor_h = 1 + (elo_diff / 1400.0)
         elo_factor_a = 1 - (elo_diff / 1400.0)
 
-        fatigue_h = 0.94 if home.rest_days < 3 else 1.0
-        fatigue_a = 0.94 if away.rest_days < 3 else 1.0
-
-        lambda_h = max(0.25, base_lambda_h * elo_factor_h * fatigue_h)
-        lambda_a = max(0.25, base_lambda_a * elo_factor_a * fatigue_a)
+        lambda_h = max(0.25, base_lambda_h * elo_factor_h)
+        lambda_a = max(0.25, base_lambda_a * elo_factor_a)
 
         return round(lambda_h, 3), round(lambda_a, 3)
 
@@ -71,32 +67,31 @@ class QuantBettingEngine:
         prob_draw = float(np.sum(np.diag(matrix)))
         prob_away = float(np.sum(np.triu(matrix, 1)))
 
-        prob_under_25 = 0.0
-        for i in range(self.max_goals):
-            for j in range(self.max_goals):
-                if i + j <= 2:
-                    prob_under_25 += matrix[i, j]
-
         return {
             "MS 1": prob_home,
             "MS X": prob_draw,
-            "MS 2": prob_away,
-            "2.5 Üst": 1.0 - prob_under_25,
-            "2.5 Alt": prob_under_25
+            "MS 2": prob_away
         }
 
     @staticmethod
-    def evaluate_bet(model_prob: float, bookie_odd: float, kelly_fraction: float = 0.25, min_ev: float = 0.03) -> Dict:
+    def evaluate_safe_favorite_bet(model_prob: float, bookie_odd: float, min_model_prob: float = 0.55, max_bookie_odd: float = 1.95, min_ev: float = 0.02) -> Dict:
+        """
+        FAVORİ ODAKLI GÜVENLİ FİLTRE:
+        - model_prob: Takımın kazanma olasılığı en az %55 olmalı.
+        - bookie_odd: Oran çok riskli yüksek olmamalı (En fazla 1.95 - 2.00 civarı sağlam favoriler).
+        - min_ev: Pozitif beklenen değer şartı.
+        """
         ev = (model_prob * bookie_odd) - 1.0
         fair_odd = round(1.0 / model_prob, 2) if model_prob > 0 else 99.0
         
-        if ev >= min_ev and bookie_odd > 1.0:
+        # Sadece favori olan, olasılığı yüksek ve +EV sunan maçları seç
+        if model_prob >= min_model_prob and bookie_odd <= max_bookie_odd and ev >= min_ev:
             full_kelly = ev / (bookie_odd - 1.0)
-            stake_pct = round(full_kelly * kelly_fraction * 100, 2)
-            signal = "YATIRIM UYGUN (+EV)"
+            stake_pct = round(full_kelly * 0.25 * 100, 2) # Çeyrek Kelly
+            signal = "SAĞLAM FAVORİ (+EV)"
         else:
             stake_pct = 0.0
-            signal = "PAS GEÇ"
+            signal = "PAS GEÇ (RİSKLİ/SÜRPRİZ)"
 
         return {
             "model_prob_pct": round(model_prob * 100, 2),
