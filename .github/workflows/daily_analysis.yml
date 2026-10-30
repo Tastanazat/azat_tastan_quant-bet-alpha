@@ -2,7 +2,7 @@ name: QuantBet Daily Pipeline
 
 on:
   schedule:
-    - cron: '0 7 * * *' # Her gün saat 10:00'da (TSİ) çalışır
+    - cron: '0 5 * * *' # Türkiye saatiyle her gün sabah 08:00'de çalışır (05:00 UTC)
   workflow_dispatch:
 
 jobs:
