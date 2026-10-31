@@ -1,6 +1,7 @@
 import os
 import requests
 import pandas as pd
+from datetime import datetime, timezone, timedelta
 from io import StringIO
 from src.engine import QuantBettingEngine, TeamMetrics
 from src.fetcher import fetch_understat_metrics, fetch_odds_from_api
@@ -26,7 +27,8 @@ def fetch_club_elo(team_name: str) -> float:
     return 1500.0
 
 def run_pipeline():
-    print("QuantBet Alpha: Kazanma Odaklı (Favori Ağırlıklı) Tarama Başlatılıyor...")
+    print("QuantBet Alpha: Esnetilmiş Filtrelerle Tarama Başlatılıyor...")
+    send_telegram_alert("🤖 *QuantBet Alpha* taraması başlatıldı. Avrupa ligleri taranıyor...")
     
     european_leagues = [
         "soccer_epl", "soccer_spain_la_liga", "soccer_italy_serie_a", 
@@ -34,14 +36,28 @@ def run_pipeline():
     ]
     
     engine = QuantBettingEngine(league_avg_xg=1.35)
+    scanned_count = 0
     found_any_value = False
+
+    now_utc = datetime.now(timezone.utc)
+    target_window = now_utc + timedelta(hours=48) # Pencereyi 48 saate çıkararak maç kaçırma riskini sıfırlıyoruz
 
     for league_key in european_leagues:
         fixtures = fetch_odds_from_api(sport_key=league_key)
         if not fixtures:
+            print(f"{league_key} için maç dönmedi.")
             continue
 
         for game in fixtures:
+            commence_time_str = game.get('commence_time')
+            if not commence_time_str:
+                continue
+            
+            game_time = datetime.fromisoformat(commence_time_str.replace('Z', '+00:00'))
+            if not (now_utc <= game_time <= target_window):
+                continue 
+
+            scanned_count += 1
             home_team = game.get('home_team')
             away_team = game.get('away_team')
             bookmakers = game.get('bookmakers', [])
@@ -75,35 +91,39 @@ def run_pipeline():
             matrix = engine.build_score_matrix(lam_h, lam_a)
             probs = engine.extract_probabilities(matrix)
 
+            local_game_time = game_time + timedelta(hours=3)
+            time_formatted = local_game_time.strftime('%d.%m.%Y - %H:%M')
+
             report = [
-                f"🛡️ *QuantBet Alpha (Favori Odaklı Rapor)*",
-                f"🌍 Lig: `{league_key.replace('soccer_', '').upper()}`",
+                f"🛡️ *QuantBet Alpha (Analiz Raporu)*",
+                f"⏰ *Başlama (TSİ):* `{time_formatted}`",
+                f"🌍 *Lig:* `{league_key.replace('soccer_', '').upper()}`",
                 f"⚽ *{ev_sahibi.name} (Elo: {home_elo}) vs {deplasman.name} (Elo: {away_elo})*",
                 f"📊 *EWMA npxG* -> Ev: `{lam_h}` | Dep: `{lam_a}`\n" + "-"*30
             ]
 
             found_value = False
-            # Sadece Ev sahibi (MS 1) veya Deplasman (MS 2) favori analizlerini incele
             for market, odd in odds_dict.items():
                 if market in probs:
-                    # GÜVENLİ FAVORİ KRİTERİ: Model olasılığı en az %55, Oran 1.95 altı
-                    res = engine.evaluate_safe_favorite_bet(probs[market], odd, min_model_prob=0.55, max_bookie_odd=1.95, min_ev=0.02)
+                    # ESNETİLMİŞ FİLTRE: Olasılık %50+, Oran 2.10 altı, +%1.5 EV
+                    res = engine.evaluate_safe_favorite_bet(probs[market], odd, min_model_prob=0.50, max_bookie_odd=2.10, min_ev=0.015)
                     if res['signal'] == "SAĞLAM FAVORİ (+EV)":
                         found_value = True
                         found_any_value = True
                         report.append(
-                            f"✅ **GÜVENLİ TERCİH: {market}**\n"
-                            f"• Model Kazanma Olasılığı: `%{res['model_prob_pct']}` (Adil Oran: `{res['fair_odd']}`)\n"
+                            f"✅ **TAVSİYE: {market}**\n"
+                            f"• Model Olasılık: `%{res['model_prob_pct']}` (Adil Oran: `{res['fair_odd']}`)\n"
                             f"• Büro Oranı: `{res['bookie_odd']}`\n"
                             f"• Beklenen Değer (EV): `+% {res['ev_pct']}`\n"
-                            f"• Önerilen Kasa (Çeyrek Kelly): `%{res['quarter_kelly_pct']}`\n"
+                            f"• Çeyrek Kelly Kasa: `%{res['quarter_kelly_pct']}`\n"
                         )
 
             if found_value:
                 send_telegram_alert("\n".join(report))
 
-    if not found_any_value:
-        print("Bugün yüksek olasılıklı (favori ağırlıklı) güvenli +EV fırsatı bulunamadı.")
+    summary_msg = f"🏁 Tarama tamamlandı. Toplam incelenen maç sayısı: {scanned_count}"
+    print(summary_msg)
+    send_telegram_alert(summary_msg)
 
 if __name__ == "__main__":
     run_pipeline()
